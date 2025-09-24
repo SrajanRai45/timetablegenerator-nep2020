@@ -1,0 +1,113 @@
+
+# Codebase Overview: Timetable Generation Dashboard
+
+This document provides a comprehensive overview of the "Timetable Generation Dashboard" codebase.
+
+## 1. Project Description
+
+This project is a web application designed to generate and manage university timetables. It provides a user-friendly dashboard for administrators to select a program and term, and then automatically generate a conflict-free timetable using an AI-powered backend. The dashboard also allows for the management of various entities such as rooms, timeslots, courses, faculty, and more.
+
+## 2. Tech Stack
+
+The project is built with a modern tech stack:
+
+*   **Frontend:**
+    *   **Next.js:** A React framework for building server-rendered and static web applications.
+    *   **TypeScript:** For static typing and improved code quality.
+    *   **React:** For building the user interface.
+    *   **Tailwind CSS:** A utility-first CSS framework for styling.
+    *   **shadcn/ui:** A collection of reusable UI components, which are heavily used throughout the application.
+    *   **Sonner:** For displaying toasts (notifications).
+    *   **Recharts:** For displaying charts (though not heavily used in the main dashboard).
+
+*   **Backend:**
+    *   **Supabase:** An open-source Firebase alternative for database, authentication, and backend services.
+    *   **Deno:** A secure runtime for JavaScript and TypeScript, used for the Supabase Edge Function.
+    *   **Google Gemini API:** The AI model (`gemini-1.5-pro-latest`) used for the core timetable generation logic.
+
+*   **Package Manager:**
+    *   **pnpm:** A fast and disk-space-efficient package manager.
+
+## 3. Project Structure
+
+The project follows a standard Next.js project structure:
+
+*   `app/`: Contains the main application pages.
+    *   `page.tsx`: The main entry point of the application, containing the timetable dashboard.
+    *   `layout.tsx`: The root layout of the application.
+    *   `globals.css`: Global CSS styles.
+*   `components/`: Contains reusable React components.
+    *   `ui/`: Contains the UI components from `shadcn/ui`.
+    *   `timetable/`: Contains custom components specifically for the timetable functionality, such as `add-entities.tsx`, `timetable-grid.tsx`, and `tuples-table.tsx`.
+    *   `theme-provider.tsx`: For managing color themes (light/dark mode).
+*   `hooks/`: Contains custom React hooks.
+    *   `use-mobile.ts`: A hook to detect if the user is on a mobile device.
+    *   `use-toast.ts`: A hook for displaying toasts.
+*   `lib/`: Contains utility functions and configurations.
+    *   `utils.ts`: Contains utility functions, such as `cn` for merging CSS classes.
+    *   `supabase/`: Contains the Supabase client configuration and database type definitions.
+        *   `client.ts`: Initializes the Supabase client.
+        *   `database.types.ts`: Contains the TypeScript types generated from the Supabase database schema.
+*   `public/`: Contains static assets like images and SVGs.
+*   `styles/`: Contains global CSS styles.
+*   `supabase/`: Contains the Supabase Edge Function.
+    *   `functions/generate-timetable/index.ts`: The core logic for generating the timetable.
+
+## 4. Core Functionality: Timetable Generation
+
+The core functionality of the application is the automatic generation of timetables. This is handled by the `generate-timetable` Supabase Edge Function.
+
+Here's how it works:
+
+1.  **Trigger:** The user clicks the "Generate Timetable" button on the dashboard.
+2.  **Request:** A request is sent to the `generate-timetable` Edge Function with the `term_id` as a parameter.
+3.  **Data Fetching:** The Edge Function fetches all the necessary data from the Supabase database for the given term, including:
+    *   Rooms
+    *   Faculty
+    *   Timeslots
+    *   Course Offerings (with course details)
+4.  **Prompt Construction:** A detailed prompt is constructed for the Google Gemini API. The prompt includes all the fetched data as context and instructs the model to generate a valid, conflict-free timetable in JSON format.
+5.  **AI Generation:** The prompt is sent to the Gemini API (`gemini-1.5-pro-latest`) with JSON mode enabled. The model generates a timetable as a JSON array of objects.
+6.  **Database Update:** The Edge Function receives the generated JSON, deletes all existing timetable entries for the given term, and inserts the new entries into the `timetable_entry` table.
+7.  **Response:** A success message is returned to the client, and the dashboard is updated with the new timetable.
+
+## 5. Database Schema
+
+The database schema is defined in `lib/supabase/database.types.ts`. It is well-structured and uses foreign keys to maintain relationships between tables. The main tables are:
+
+*   `institute`: Stores information about the institute.
+*   `department`: Stores information about departments within an institute.
+*   `program`: Stores information about academic programs.
+*   `term`: Stores information about academic terms (e.g., Fall 2025).
+*   `course`: Stores information about courses.
+*   `course_offering`: Represents a specific offering of a course in a term.
+*   `faculty`: Stores information about faculty members.
+*   `student`: Stores information about students.
+*   `room`: Stores information about rooms and their capacity.
+*   `timeslot`: Stores information about time slots for classes.
+*   `timetable_entry`: The main table that stores the generated timetable, linking courses, rooms, faculty, and timeslots.
+
+## 6. How to Run the Project
+
+To run the project, you need to have Node.js and pnpm installed.
+
+1.  **Install dependencies:**
+    ```bash
+    pnpm install
+    ```
+2.  **Set up environment variables:**
+    Create a `.env.local` file in the root of the project and add your Supabase and Gemini API keys:
+    ```
+    NEXT_PUBLIC_SUPABASE_URL="your-supabase-url"
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="your-supabase-anon-key"
+    GEMINI_API_KEY="your-gemini-api-key"
+    ```
+3.  **Run the development server:**
+    ```bash
+    pnpm dev
+    ```
+    The application will be available at `http://localhost:3000`.
+
+## 7. Conclusion
+
+This codebase represents a well-structured and modern web application for timetable generation. It leverages the power of Next.js for the frontend, Supabase for the backend, and the Google Gemini API for the core AI-powered functionality. The code is well-organized, and the use of TypeScript and `shadcn/ui` ensures a high level of code quality and a consistent user experience.

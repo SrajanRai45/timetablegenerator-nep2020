@@ -1,0 +1,180 @@
+You said:
+Suppose we have UI and we need to fix the backend that is going on behind it and we will be using Gemini CLI. The prompt for that is being generated right now. So, the prompt basically will do a few things. As we can see, entirety of UI doesn't have any option for Institute, nor it does have any option for Department. If you can add them in the UI, please add them. If you can't, please don't. The UI should not be broken. That is one thing. The second thing is, basically, the UI that is going to be generated should not be changed. I think that is the way we are going for here. We have Program Selection, Term Selection. What we get in the dropdown is something that we get from the backend. So, fix the backend. So, what we will be doing is, we will be selecting the Computer Science, like the first Department and the first Program. Well, why do we select first of both? Because they are leading us to the BTech Computer Science Engineering Program. So, this program will have two terms or one term, any amount that we can see. Or, let it just be whatever the hell it is. Right, we are just uploading data from CSV. Okay, it doesn't seem to be too bad. But what is needed to be done below it is something very important. I think the display is displaying everything, like select the stars from the table and showing everything that is inside of the table. I think there will be a better approach if whatever we have selected above, whatever the program and term we have selected above, only related data to that should be shown below. Not everything from the table, but related to that single program. Okay, like changing it to first department and first institute would not be that good. But, I think we are getting clearer here.
+ChatGPT said:
+
+Got it Srajan 👍, let me carefully break this down for you step by step 💡 so we don’t miss anything.
+
+🎯 What you have right now
+
+UI
+
+Doesn’t have Institute and Department options.
+
+Has Program Selection and Term Selection dropdowns (these values are fetched from backend).
+
+The lower part (data display) is just showing everything from the table (SELECT *) regardless of selection.
+
+Backend
+
+Pulls data but doesn’t filter based on what’s selected.
+
+Right now, you are relying on default “first Department + first Program” → leads to BTech CSE.
+
+🛠️ What needs to be fixed
+
+Institute & Department in UI
+
+If UI framework can support adding dropdowns without breaking layout → add them.
+
+If not → leave UI as is (don’t force it).
+
+Backend logic
+
+Current: SELECT * FROM table (showing everything).
+
+Required: Filter data dynamically based on what’s chosen in dropdowns:
+
+Institute → Department → Program → Term.
+
+That means: only show records related to the chosen Program & Term (instead of dumping everything).
+
+Default behavior
+
+Instead of hardcoding “first department + first program”, backend should:
+
+Return available Institutes → user picks.
+
+Once institute is picked → fetch Departments inside that Institute.
+
+Once Department is picked → fetch Programs under it.
+
+Once Program is picked → fetch Terms under it.
+
+Then, show filtered table data for that Program+Term.
+
+✨ Example Flow (Ideal)
+
+Dropdown 1 → Select Institute (say: Gyan Ganga Institute of Tech.).
+
+Dropdown 2 → Based on Institute, load Departments (e.g., Computer Science, Mechanical, etc.).
+
+Dropdown 3 → Based on Department, load Programs (e.g., BTech CSE, BTech DS).
+
+Dropdown 4 → Based on Program, load Terms (e.g., Term 1, Term 2).
+
+Display Section → Query only that specific Program + Term data from DB.
+
+🔑 Backend Query Fix
+
+Instead of:
+
+SELECT * FROM timetable;
+
+
+Do:
+
+SELECT * 
+FROM timetable 
+WHERE program_id = $selectedProgram 
+  AND term_id = $selectedTerm;
+
+
+And if you want full cascading:
+
+-- Institute → Department → Program → Term
+SELECT * 
+FROM timetable 
+WHERE institute_id = $selectedInstitute
+  AND department_id = $selectedDepartment
+  AND program_id = $selectedProgram
+  AND term_id = $selectedTerm;
+
+🚦 Decision Point
+
+If UI cannot be expanded with Institute/Department → keep it as is (just Program + Term).
+
+If UI can handle it → add cascading dropdowns.
+
+Either way, backend must filter properly and not rely on "first of both".
+
+👉 Srajan, do you want me to write the actual Gemini CLI prompt that will enforce this backend fix (with the filtering logic + optional UI dropdowns), or do you prefer just the backend query + logic explanation first?
+
+You said:
+Database is super base and we are going to reconnect all the shit that there is. We think adding department and institute would be a very good option but not doing that is totally fine. What we need to do here is show data that is relevant to the options that we have selected above. That is one thing we need to keep in mind all the time. Right? I think that is the way we are going to do things. Okay, now let's go. I think we are almost done here.
+ChatGPT said:
+
+Perfect ✅ Srajan, now we’re crystal clear 🌟. Let me summarize the final approach step by step so we can “lock it in” 🔒:
+
+🎯 Core Requirement
+
+The display section must only show filtered data based on what’s selected in the dropdowns above (Program + Term at minimum, Institute/Department if added).
+
+No more SELECT * dumping everything — only contextual results.
+
+🛠️ Backend Fix Strategy
+
+Program & Term already exist in UI
+
+Make sure backend queries include these filters:
+
+SELECT * 
+FROM timetable 
+WHERE program_id = $selectedProgram
+  AND term_id = $selectedTerm;
+
+
+If Institute + Department dropdowns are added (bonus step, optional)
+
+Add cascading logic:
+
+SELECT * 
+FROM timetable 
+WHERE institute_id = $selectedInstitute
+  AND department_id = $selectedDepartment
+  AND program_id = $selectedProgram
+  AND term_id = $selectedTerm;
+
+
+Frontend fetches filtered lists step by step: Institute → Department → Program → Term.
+
+Default Fallback (when no filters selected)
+
+Option A: Show nothing until something is chosen.
+
+Option B: Show “first available Program + Term” data (but this should be clearly indicated in UI).
+
+🚀 How it fits with Supabase
+
+Supabase lets you filter data directly in queries. Example in JS:
+
+const { data, error } = await supabase
+  .from('timetable')
+  .select('*')
+  .eq('program_id', selectedProgram)
+  .eq('term_id', selectedTerm);
+
+
+If adding Institute/Department:
+
+const { data, error } = await supabase
+  .from('timetable')
+  .select('*')
+  .eq('institute_id', selectedInstitute)
+  .eq('department_id', selectedDepartment)
+  .eq('program_id', selectedProgram)
+  .eq('term_id', selectedTerm);
+
+✅ End Goal
+
+UI remains intact (with optional upgrade for institute/department).
+
+Backend fixed → only show relevant data.
+
+No broken dropdowns, no confusing “first-of-both” defaults unless explicitly needed.
+
+⚡So basically, Srajan:
+👉 Backend = filter based on selected values.
+👉 UI = stays the same (or gets extra dropdowns if possible).
+👉 Data = only contextual, no more “everything dump.”
+
+Do you want me to draft the Gemini CLI prompt now that will generate exactly this backend logic (with Supabase filters + optional dropdown handling), so you can just run it?

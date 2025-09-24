@@ -1,0 +1,1355 @@
+"use client"
+
+import { useMemo, useState } from "react"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Separator } from "@/components/ui/separator"
+import { AddEntitiesPanel } from "@/components/timetable/add-entities"
+import { TuplesTable } from "@/components/timetable/tuples-table"
+import { TimetableGrid } from "@/components/timetable/timetable-grid"
+import {
+  type Course,
+  type CourseOffering,
+  type Faculty,
+  type Program,
+  type Room,
+  type Term,
+  type TimeSlot,
+  type TimetableEntry,
+  dayOrder,
+  dayNames,
+} from "@/components/timetable/types"
+
+type IdGen = () => number
+const makeIdGen = (): IdGen => {
+  let cur = 1
+  return () => cur++
+}
+
+export default function HomePage() {
+  // Seeded Programs and Terms (derived from schema: program, term)
+  const [programs] = useState<Program[]>([
+    { program_id: 1, name: "B.Tech CSE", department_id: 10 },
+    { program_id: 2, name: "MBA", department_id: 20 },
+  ])
+  const [terms] = useState<Term[]>([
+    { term_id: 1, program_id: 1, year: 2025, semester: 1 },
+    { term_id: 2, program_id: 1, year: 2025, semester: 2 },
+    { term_id: 3, program_id: 2, year: 2025, semester: 1 },
+  ])
+
+  // UI selection
+  const [selectedProgramId, setSelectedProgramId] = useState<number | null>(programs[0]?.program_id ?? null)
+  const availableTerms = useMemo(
+    () => terms.filter((t) => (selectedProgramId ? t.program_id === selectedProgramId : true)),
+    [terms, selectedProgramId],
+  )
+  const [selectedTermId, setSelectedTermId] = useState<number | null>(availableTerms[0]?.term_id ?? null)
+
+  // Entity state (derived from schema)
+  const [rooms, setRooms] = useState<Room[]>([])
+  const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([])
+  const [courses, setCourses] = useState<Course[]>([])
+  const [offerings, setOfferings] = useState<CourseOffering[]>([])
+  const [faculty, setFaculty] = useState<Faculty[]>([])
+  const [entries, setEntries] = useState<TimetableEntry[]>([])
+
+  // Simple ID generators
+  const nextRoomId = useMemo(makeIdGen, [])
+  const nextTimeSlotId = useMemo(makeIdGen, [])
+  const nextCourseId = useMemo(makeIdGen, [])
+  const nextOfferingId = useMemo(makeIdGen, [])
+  const nextFacultyId = useMemo(makeIdGen, [])
+  const nextEntryId = useMemo(makeIdGen, [])
+
+  const currentTermSlots = useMemo(
+    () => (selectedTermId ? timeSlots.filter((ts) => ts.term_id === selectedTermId) : []),
+    [timeSlots, selectedTermId],
+  )
+  const currentTermOfferings = useMemo(
+    () => (selectedTermId ? offerings.filter((o) => o.term_id === selectedTermId) : []),
+    [offerings, selectedTermId],
+  )
+
+  // Simple timetable generation stub:
+  // Iterates offerings for the selected term and places them in the first free (day, timeslot),
+  // assigns the first available room and faculty if present.
+  const handleGenerate = () => {
+    if (!selectedTermId) return
+    const termSlots = currentTermSlots.sort((a, b) => a.start_time.localeCompare(b.start_time))
+    if (termSlots.length === 0 || currentTermOfferings.length === 0) return
+
+    const newEntries: TimetableEntry[] = []
+    const usedCombos = new Set<string>() // key: `${day}-${timeslot_id}`
+
+    let slotIndex = 0
+    let dayIndex = 0
+
+    for (const off of currentTermOfferings) {
+      // find next available day/slot
+      let placed = false
+      for (let tries = 0; tries < dayNames.length * termSlots.length; tries++) {
+        const day = dayNames[dayIndex % dayNames.length]
+        const slot = termSlots[slotIndex % termSlots.length]
+        const key = `${day}-${slot.timeslot_id}`
+
+        if (!usedCombos.has(key)) {
+          usedCombos.add(key)
+          newEntries.push({
+            entry_id: nextEntryId(),
+            term_id: selectedTermId,
+            day,
+            timeslot_id: slot.timeslot_id,
+            offering_id: off.offering_id,
+            room_id: rooms[0]?.room_id ?? -1,
+            faculty_id: faculty[0]?.faculty_id ?? -1,
+          })
+          placed = true
+          slotIndex++
+          if (slotIndex % termSlots.length === 0) {
+            dayIndex++
+          }
+          break
+        } else {
+          slotIndex++
+          if (slotIndex % termSlots.length === 0) {
+            dayIndex++
+          }
+        }
+      }
+      // If cannot place, skip silently
+      if (!placed) {
+        // no-op; realistically you'd add feedback
+      }
+    }
+    // Replace entries for this term with fresh generation
+    setEntries((prev) => prev.filter((e) => e.term_id !== selectedTermId).concat(newEntries))
+  }
+
+  // Maps for display
+  const roomById = useMemo(() => new Map(rooms.map((r) => [r.room_id, r])), [rooms])
+  const facultyById = useMemo(() => new Map(faculty.map((f) => [f.faculty_id, f])), [faculty])
+  const courseById = useMemo(() => new Map(courses.map((c) => [c.course_id, c])), [courses])
+  const offeringById = useMemo(() => new Map(offerings.map((o) => [o.offering_id, o])), [offerings])
+
+  return (
+    <main className="min-h-dvh p-4 md:p-6 lg:p-8 space-y-6">
+      <Card className="bg-card text-card-foreground">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-pretty">Timetable Generation</CardTitle>
+            <CardDescription>Select a Program and Term, then generate or edit the timetable.</CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="program">Program</Label>
+              <Select
+                value={selectedProgramId ? String(selectedProgramId) : undefined}
+                onValueChange={(v) => {
+                  const id = Number(v)
+                  setSelectedProgramId(id)
+                  const firstTerm = terms.find((t) => t.program_id === id)
+                  setSelectedTermId(firstTerm?.term_id ?? null)
+                }}
+              >
+                <SelectTrigger id="program" aria-label="Select Program">
+                  <SelectValue placeholder="Select a program" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {programs.map((p) => (
+                      <SelectItem key={p.program_id} value={String(p.program_id)}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="term">Term</Label>
+              <Select
+                value={selectedTermId ? String(selectedTermId) : undefined}
+                onValueChange={(v) => setSelectedTermId(Number(v))}
+              >
+                <SelectTrigger id="term" aria-label="Select Term">
+                  <SelectValue placeholder="Select a term" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {availableTerms.map((t) => (
+                      <SelectItem key={t.term_id} value={String(t.term_id)}>
+                        {`Year ${t.year} • Sem ${t.semester}`}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-end">
+              <Button
+                className="w-full"
+                variant="default"
+                onClick={handleGenerate}
+                disabled={!selectedProgramId || !selectedTermId}
+                aria-label="Generate Timetable"
+              >
+                Generate Timetable
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="bg-card text-card-foreground">
+        <CardHeader>
+          <CardTitle className="text-pretty">Attributes & New Elements</CardTitle>
+          <CardDescription>
+            Add new Rooms, TimeSlots, Courses, Offerings, Faculty, and Timetable Entries based on the schema.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <AddEntitiesPanel
+            // Rooms
+            onAddRoom={(payload) => {
+              setRooms((prev) =>
+                prev.concat({
+                  room_id: nextRoomId(),
+                  name: payload.name,
+                  capacity: payload.capacity,
+                  institute_id: payload.institute_id ?? 1,
+                  room_type: payload.room_type,
+                }),
+              )
+            }}
+            // Timeslots
+            onAddTimeSlot={(payload) => {
+              if (!selectedTermId) return
+              setTimeSlots((prev) =>
+                prev.concat({
+                  timeslot_id: nextTimeSlotId(),
+                  term_id: selectedTermId,
+                  start_time: payload.start_time,
+                  end_time: payload.end_time,
+                }),
+              )
+            }}
+            // Course
+            onAddCourse={(payload) => {
+              setCourses((prev) =>
+                prev.concat({
+                  course_id: nextCourseId(),
+                  course_code: payload.course_code,
+                  name: payload.name,
+                  course_type: payload.course_type,
+                  department_id: payload.department_id ?? 0,
+                  theory_credits: payload.theory_credits,
+                  lab_credits: payload.lab_credits,
+                }),
+              )
+            }}
+            // Offering
+            onAddOffering={(payload) => {
+              if (!selectedTermId) return
+              setOfferings((prev) =>
+                prev.concat({
+                  offering_id: nextOfferingId(),
+                  course_id: payload.course_id,
+                  term_id: selectedTermId,
+                  section: payload.section ?? "",
+                  enrollment_limit: payload.enrollment_limit ?? undefined,
+                }),
+              )
+            }}
+            // Faculty
+            onAddFaculty={(payload) => {
+              setFaculty((prev) =>
+                prev.concat({
+                  faculty_id: nextFacultyId(),
+                  name: payload.name,
+                  department_id: payload.department_id ?? 0,
+                  email: payload.email ?? "",
+                }),
+              )
+            }}
+            // Entry
+            onAddEntry={(payload) => {
+              if (!selectedTermId) return
+              setEntries((prev) =>
+                prev.concat({
+                  entry_id: nextEntryId(),
+                  term_id: selectedTermId,
+                  day: payload.day,
+                  timeslot_id: payload.timeslot_id,
+                  offering_id: payload.offering_id,
+                  room_id: payload.room_id,
+                  faculty_id: payload.faculty_id,
+                }),
+              )
+            }}
+            context={{
+              termId: selectedTermId ?? null,
+              timeslots: currentTermSlots,
+              rooms,
+              faculty,
+              courses,
+              offerings: currentTermOfferings,
+            }}
+          />
+        </CardContent>
+      </Card>
+
+      <Card className="bg-card text-card-foreground">
+        <CardHeader>
+          <CardTitle className="text-pretty">Tuples (Table Contents)</CardTitle>
+          <CardDescription>Current data for each schema table.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <section aria-labelledby="rooms-heading">
+            <h3 id="rooms-heading" className="text-sm font-medium opacity-80 mb-2">
+              room
+            </h3>
+            <TuplesTable
+              items={rooms}
+              columns={[
+                { key: "room_id", header: "ID" },
+                { key: "name", header: "Name" },
+                { key: "capacity", header: "Capacity" },
+                { key: "room_type", header: "Type" },
+              ]}
+            />
+          </section>
+
+          <Separator />
+
+          <section aria-labelledby="timeslots-heading">
+            <h3 id="timeslots-heading" className="text-sm font-medium opacity-80 mb-2">
+              timeslot (current term)
+            </h3>
+            <TuplesTable
+              items={currentTermSlots}
+              columns={[
+                { key: "timeslot_id", header: "ID" },
+                { key: "start_time", header: "Start" },
+                { key: "end_time", header: "End" },
+              ]}
+            />
+          </section>
+
+          <Separator />
+
+          <section aria-labelledby="courses-heading">
+            <h3 id="courses-heading" className="text-sm font-medium opacity-80 mb-2">
+              course
+            </h3>
+            <TuplesTable
+              items={courses}
+              columns={[
+                { key: "course_id", header: "ID" },
+                { key: "course_code", header: "Code" },
+                { key: "name", header: "Name" },
+                { key: "course_type", header: "Type" },
+                { key: "theory_credits", header: "Th" },
+                { key: "lab_credits", header: "Lab" },
+              ]}
+            />
+          </section>
+
+          <Separator />
+
+          <section aria-labelledby="offerings-heading">
+            <h3 id="offerings-heading" className="text-sm font-medium opacity-80 mb-2">
+              course_offering (current term)
+            </h3>
+            <TuplesTable
+              items={currentTermOfferings.map((o) => ({
+                ...o,
+                course_name: courseById.get(o.course_id)?.name ?? "",
+              }))}
+              columns={[
+                { key: "offering_id", header: "ID" },
+                { key: "course_id", header: "Course ID" },
+                { key: "course_name", header: "Course" },
+                { key: "section", header: "Section" },
+                { key: "enrollment_limit", header: "Limit" },
+              ]}
+            />
+          </section>
+
+          <Separator />
+
+          <section aria-labelledby="faculty-heading">
+            <h3 id="faculty-heading" className="text-sm font-medium opacity-80 mb-2">
+              faculty
+            </h3>
+            <TuplesTable
+              items={faculty}
+              columns={[
+                { key: "faculty_id", header: "ID" },
+                { key: "name", header: "Name" },
+                { key: "email", header: "Email" },
+              ]}
+            />
+          </section>
+
+          <Separator />
+
+          <section aria-labelledby="entries-heading">
+            <h3 id="entries-heading" className="text-sm font-medium opacity-80 mb-2">
+              timetable_entry (current term)
+            </h3>
+            <TuplesTable
+              items={entries
+                .filter((e) => (selectedTermId ? e.term_id === selectedTermId : true))
+                .sort((a, b) => {
+                  if (a.day === b.day) return a.timeslot_id - b.timeslot_id
+                  return dayOrder[a.day] - dayOrder[b.day]
+                })
+                .map((e) => ({
+                  ...e,
+                  course: (() => {
+                    const off = offeringById.get(e.offering_id)
+                    return off ? (courseById.get(off.course_id)?.name ?? "") : ""
+                  })(),
+                  room: roomById.get(e.room_id)?.name ?? "",
+                  faculty: facultyById.get(e.faculty_id)?.name ?? "",
+                  timeslot: (() => {
+                    const ts = timeSlots.find((t) => t.timeslot_id === e.timeslot_id)
+                    return ts ? `${ts.start_time}–${ts.end_time}` : ""
+                  })(),
+                }))}
+              columns={[
+                { key: "entry_id", header: "ID" },
+                { key: "day", header: "Day" },
+                { key: "timeslot", header: "Time" },
+                { key: "course", header: "Course" },
+                { key: "room", header: "Room" },
+                { key: "faculty", header: "Faculty" },
+              ]}
+            />
+          </section>
+        </CardContent>
+      </Card>
+
+      <Card className="bg-card text-card-foreground">
+        <CardHeader>
+          <CardTitle className="text-pretty">Timetable</CardTitle>
+          <CardDescription>
+            Grid view by day and timeslot for the selected term. Add entries or generate above.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <TimetableGrid
+            termId={selectedTermId ?? null}
+            days={dayNames}
+            timeSlots={currentTermSlots}
+            entries={entries.filter((e) => (selectedTermId ? e.term_id === selectedTermId : true))}
+            offeringById={offeringById}
+            courseById={courseById}
+            roomById={roomById}
+            facultyById={facultyById}
+          />
+        </CardContent>
+      </Card>
+    </main>
+  )
+}
+"use client"
+
+import type React from "react"
+
+import { useMemo, useState } from "react"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  type Course,
+  type CourseOffering,
+  type CourseType,
+  type DayName,
+  type Faculty,
+  type Room,
+  type TimeSlot,
+  dayNames,
+} from "./types"
+
+type Context = {
+  termId: number | null
+  timeslots: TimeSlot[]
+  rooms: Room[]
+  faculty: Faculty[]
+  courses: Course[]
+  offerings: CourseOffering[]
+}
+
+export function AddEntitiesPanel(props: {
+  onAddRoom: (payload: { name: string; capacity: number; institute_id?: number; room_type: string }) => void
+  onAddTimeSlot: (payload: { start_time: string; end_time: string }) => void
+  onAddCourse: (payload: {
+    course_code: string
+    name: string
+    course_type: CourseType
+    department_id?: number
+    theory_credits: number
+    lab_credits: number
+  }) => void
+  onAddOffering: (payload: { course_id: number; section?: string; enrollment_limit?: number }) => void
+  onAddFaculty: (payload: { name: string; department_id?: number; email?: string }) => void
+  onAddEntry: (payload: {
+    day: DayName
+    timeslot_id: number
+    offering_id: number
+    room_id: number
+    faculty_id: number
+  }) => void
+  context: Context
+}) {
+  const { context } = props
+
+  return (
+    <Tabs defaultValue="room">
+      <TabsList className="grid grid-cols-2 md:grid-cols-6 w-full">
+        <TabsTrigger value="room">Room</TabsTrigger>
+        <TabsTrigger value="timeslot">TimeSlot</TabsTrigger>
+        <TabsTrigger value="course">Course</TabsTrigger>
+        <TabsTrigger value="offering">Offering</TabsTrigger>
+        <TabsTrigger value="faculty">Faculty</TabsTrigger>
+        <TabsTrigger value="entry">Timetable Entry</TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="room">
+        <EntityCard title="Add Room">
+          <AddRoomForm onSubmit={props.onAddRoom} />
+        </EntityCard>
+      </TabsContent>
+
+      <TabsContent value="timeslot">
+        <EntityCard title="Add TimeSlot">
+          <AddTimeSlotForm onSubmit={props.onAddTimeSlot} disabled={!context.termId} />
+          {!context.termId && (
+            <p className="text-sm opacity-75 mt-2">Select a term above to add a timeslot for that term.</p>
+          )}
+        </EntityCard>
+      </TabsContent>
+
+      <TabsContent value="course">
+        <EntityCard title="Add Course">
+          <AddCourseForm onSubmit={props.onAddCourse} />
+        </EntityCard>
+      </TabsContent>
+
+      <TabsContent value="offering">
+        <EntityCard title="Add Offering">
+          <AddOfferingForm onSubmit={props.onAddOffering} courses={context.courses} disabled={!context.termId} />
+          {!context.termId && (
+            <p className="text-sm opacity-75 mt-2">Select a term above to add an offering for that term.</p>
+          )}
+        </EntityCard>
+      </TabsContent>
+
+      <TabsContent value="faculty">
+        <EntityCard title="Add Faculty">
+          <AddFacultyForm onSubmit={props.onAddFaculty} />
+        </EntityCard>
+      </TabsContent>
+
+      <TabsContent value="entry">
+        <EntityCard title="Add Timetable Entry">
+          <AddEntryForm
+            onSubmit={props.onAddEntry}
+            context={context}
+            disabled={!context.termId || context.timeslots.length === 0 || context.offerings.length === 0}
+          />
+          {!context.termId && <p className="text-sm opacity-75 mt-2">Select a term above to add entries.</p>}
+        </EntityCard>
+      </TabsContent>
+    </Tabs>
+  )
+}
+
+function EntityCard(props: { title: string; children: React.ReactNode }) {
+  return (
+    <Card className="bg-secondary text-secondary-foreground">
+      <CardHeader>
+        <CardTitle className="text-pretty">{props.title}</CardTitle>
+      </CardHeader>
+      <CardContent>{props.children}</CardContent>
+    </Card>
+  )
+}
+
+function AddRoomForm(props: {
+  onSubmit: (payload: { name: string; capacity: number; institute_id?: number; room_type: string }) => void
+}) {
+  const [name, setName] = useState("")
+  const [capacity, setCapacity] = useState<number>(40)
+  const [roomType, setRoomType] = useState<string>("Lecture")
+  const [instituteId, setInstituteId] = useState<number | "">("")
+
+  return (
+    <form
+      className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end"
+      onSubmit={(e) => {
+        e.preventDefault()
+        props.onSubmit({
+          name,
+          capacity: Number(capacity),
+          room_type: roomType,
+          institute_id: instituteId === "" ? undefined : Number(instituteId),
+        })
+        setName("")
+        setCapacity(40)
+        setRoomType("Lecture")
+        setInstituteId("")
+      }}
+    >
+      <div className="space-y-2">
+        <Label htmlFor="room-name">Name</Label>
+        <Input id="room-name" value={name} onChange={(e) => setName(e.target.value)} required />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="room-capacity">Capacity</Label>
+        <Input
+          id="room-capacity"
+          type="number"
+          min={1}
+          value={capacity}
+          onChange={(e) => setCapacity(Number(e.target.value))}
+          required
+        />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="room-type">Room Type</Label>
+        <Input id="room-type" value={roomType} onChange={(e) => setRoomType(e.target.value)} />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="room-inst">Institute ID (opt)</Label>
+        <Input
+          id="room-inst"
+          type="number"
+          min={1}
+          value={instituteId}
+          onChange={(e) => setInstituteId(e.target.value === "" ? "" : Number(e.target.value))}
+        />
+      </div>
+      <Button type="submit" className="md:col-span-4">
+        Save Room
+      </Button>
+    </form>
+  )
+}
+
+function AddTimeSlotForm(props: {
+  onSubmit: (payload: { start_time: string; end_time: string }) => void
+  disabled?: boolean
+}) {
+  const [start, setStart] = useState("09:00")
+  const [end, setEnd] = useState("10:00")
+  return (
+    <form
+      className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end"
+      onSubmit={(e) => {
+        e.preventDefault()
+        props.onSubmit({ start_time: start, end_time: end })
+      }}
+    >
+      <div className="space-y-2">
+        <Label htmlFor="ts-start">Start Time</Label>
+        <Input
+          id="ts-start"
+          type="time"
+          value={start}
+          onChange={(e) => setStart(e.target.value)}
+          required
+          disabled={props.disabled}
+        />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="ts-end">End Time</Label>
+        <Input
+          id="ts-end"
+          type="time"
+          value={end}
+          onChange={(e) => setEnd(e.target.value)}
+          required
+          disabled={props.disabled}
+        />
+      </div>
+      <Button type="submit" disabled={props.disabled}>
+        Save TimeSlot
+      </Button>
+    </form>
+  )
+}
+
+function AddCourseForm(props: {
+  onSubmit: (payload: {
+    course_code: string
+    name: string
+    course_type: CourseType
+    department_id?: number
+    theory_credits: number
+    lab_credits: number
+  }) => void
+}) {
+  const [code, setCode] = useState("")
+  const [name, setName] = useState("")
+  const [ctype, setCtype] = useState<CourseType>("Major")
+  const [deptId, setDeptId] = useState<number | "">("")
+  const [th, setTh] = useState(3)
+  const [lab, setLab] = useState(0)
+
+  return (
+    <form
+      className="grid grid-cols-1 md:grid-cols-6 gap-4 items-end"
+      onSubmit={(e) => {
+        e.preventDefault()
+        props.onSubmit({
+          course_code: code,
+          name,
+          course_type: ctype,
+          department_id: deptId === "" ? undefined : Number(deptId),
+          theory_credits: th,
+          lab_credits: lab,
+        })
+        setCode("")
+        setName("")
+        setCtype("Major")
+        setDeptId("")
+        setTh(3)
+        setLab(0)
+      }}
+    >
+      <div className="space-y-2">
+        <Label htmlFor="c-code">Course Code</Label>
+        <Input id="c-code" value={code} onChange={(e) => setCode(e.target.value)} required />
+      </div>
+      <div className="space-y-2 md:col-span-2">
+        <Label htmlFor="c-name">Name</Label>
+        <Input id="c-name" value={name} onChange={(e) => setName(e.target.value)} required />
+      </div>
+      <div className="space-y-2">
+        <Label>Type</Label>
+        <Select value={ctype} onValueChange={(v) => setCtype(v as CourseType)}>
+          <SelectTrigger>
+            <SelectValue placeholder="Course Type" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {["Major", "Minor", "Skill", "AEC", "VAC", "Lab"].map((t) => (
+                <SelectItem key={t} value={t}>
+                  {t}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="c-dept">Department ID (opt)</Label>
+        <Input
+          id="c-dept"
+          type="number"
+          min={0}
+          value={deptId}
+          onChange={(e) => setDeptId(e.target.value === "" ? "" : Number(e.target.value))}
+        />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="c-th">Theory Credits</Label>
+        <Input id="c-th" type="number" min={0} value={th} onChange={(e) => setTh(Number(e.target.value))} required />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="c-lab">Lab Credits</Label>
+        <Input id="c-lab" type="number" min={0} value={lab} onChange={(e) => setLab(Number(e.target.value))} required />
+      </div>
+      <Button type="submit" className="md:col-span-6">
+        Save Course
+      </Button>
+    </form>
+  )
+}
+
+function AddOfferingForm(props: {
+  onSubmit: (payload: { course_id: number; section?: string; enrollment_limit?: number }) => void
+  courses: Course[]
+  disabled?: boolean
+}) {
+  const [courseId, setCourseId] = useState<number | null>(null)
+  const [section, setSection] = useState("")
+  const [limit, setLimit] = useState<number | "">("")
+
+  return (
+    <form
+      className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (!courseId) return
+        props.onSubmit({
+          course_id: courseId,
+          section: section || undefined,
+          enrollment_limit: limit === "" ? undefined : Number(limit),
+        })
+        setCourseId(null)
+        setSection("")
+        setLimit("")
+      }}
+    >
+      <div className="space-y-2 md:col-span-2">
+        <Label>Course</Label>
+        <Select
+          value={courseId ? String(courseId) : undefined}
+          onValueChange={(v) => setCourseId(Number(v))}
+          disabled={props.disabled}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Select course" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {props.courses.map((c) => (
+                <SelectItem key={c.course_id} value={String(c.course_id)}>
+                  {c.course_code} — {c.name}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="off-sec">Section (opt)</Label>
+        <Input id="off-sec" value={section} onChange={(e) => setSection(e.target.value)} disabled={props.disabled} />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="off-limit">Enroll Limit (opt)</Label>
+        <Input
+          id="off-limit"
+          type="number"
+          min={1}
+          value={limit}
+          onChange={(e) => setLimit(e.target.value === "" ? "" : Number(e.target.value))}
+          disabled={props.disabled}
+        />
+      </div>
+      <Button type="submit" disabled={props.disabled}>
+        Save Offering
+      </Button>
+    </form>
+  )
+}
+
+function AddFacultyForm(props: {
+  onSubmit: (payload: { name: string; department_id?: number; email?: string }) => void
+}) {
+  const [name, setName] = useState("")
+  const [dept, setDept] = useState<number | "">("")
+  const [email, setEmail] = useState("")
+
+  return (
+    <form
+      className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end"
+      onSubmit={(e) => {
+        e.preventDefault()
+        props.onSubmit({ name, department_id: dept === "" ? undefined : Number(dept), email: email || undefined })
+        setName("")
+        setDept("")
+        setEmail("")
+      }}
+    >
+      <div className="space-y-2 md:col-span-2">
+        <Label htmlFor="f-name">Name</Label>
+        <Input id="f-name" value={name} onChange={(e) => setName(e.target.value)} required />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="f-dept">Department ID (opt)</Label>
+        <Input
+          id="f-dept"
+          type="number"
+          min={0}
+          value={dept}
+          onChange={(e) => setDept(e.target.value === "" ? "" : Number(e.target.value))}
+        />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="f-email">Email (opt)</Label>
+        <Input id="f-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+      </div>
+      <Button type="submit">Save Faculty</Button>
+    </form>
+  )
+}
+
+function AddEntryForm(props: {
+  onSubmit: (payload: {
+    day: DayName
+    timeslot_id: number
+    offering_id: number
+    room_id: number
+    faculty_id: number
+  }) => void
+  context: Context
+  disabled?: boolean
+}) {
+  const { context } = props
+  const [day, setDay] = useState<DayName>("Mon")
+  const [timeslotId, setTimeslotId] = useState<number | null>(null)
+  const [offeringId, setOfferingId] = useState<number | null>(null)
+  const [roomId, setRoomId] = useState<number | null>(null)
+  const [facultyId, setFacultyId] = useState<number | null>(null)
+
+  const timeslotOptions = useMemo(
+    () =>
+      context.timeslots
+        .slice()
+        .sort((a, b) => a.start_time.localeCompare(b.start_time))
+        .map((t) => ({ value: t.timeslot_id, label: `${t.start_time}–${t.end_time}` })),
+    [context.timeslots],
+  )
+
+  return (
+    <form
+      className="grid grid-cols-1 md:grid-cols-6 gap-4 items-end"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (!timeslotId || !offeringId || !roomId || !facultyId) return
+        props.onSubmit({
+          day,
+          timeslot_id: timeslotId,
+          offering_id: offeringId,
+          room_id: roomId,
+          faculty_id: facultyId,
+        })
+        setTimeslotId(null)
+        setOfferingId(null)
+        setRoomId(null)
+        setFacultyId(null)
+        setDay("Mon")
+      }}
+    >
+      <div className="space-y-2">
+        <Label>Day</Label>
+        <Select value={day} onValueChange={(v) => setDay(v as DayName)} disabled={props.disabled}>
+          <SelectTrigger>
+            <SelectValue placeholder="Select a day" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {dayNames.map((d) => (
+                <SelectItem key={d} value={d}>
+                  {d}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="space-y-2">
+        <Label>TimeSlot</Label>
+        <Select
+          value={timeslotId ? String(timeslotId) : undefined}
+          onValueChange={(v) => setTimeslotId(Number(v))}
+          disabled={props.disabled}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Select timeslot" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {timeslotOptions.map((t) => (
+                <SelectItem key={t.value} value={String(t.value)}>
+                  {t.label}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="space-y-2 md:col-span-2">
+        <Label>Offering</Label>
+        <Select
+          value={offeringId ? String(offeringId) : undefined}
+          onValueChange={(v) => setOfferingId(Number(v))}
+          disabled={props.disabled}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Select offering" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {context.offerings.map((o) => {
+                const course = context.courses.find((c) => c.course_id === o.course_id)
+                return (
+                  <SelectItem key={o.offering_id} value={String(o.offering_id)}>
+                    {course ? `${course.course_code} — ${course.name}` : `Offering #${o.offering_id}`}
+                    {o.section ? ` • ${o.section}` : ""}
+                  </SelectItem>
+                )
+              })}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="space-y-2">
+        <Label>Room</Label>
+        <Select
+          value={roomId ? String(roomId) : undefined}
+          onValueChange={(v) => setRoomId(Number(v))}
+          disabled={props.disabled}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Select room" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {context.rooms.map((r) => (
+                <SelectItem key={r.room_id} value={String(r.room_id)}>
+                  {r.name} ({r.capacity})
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="space-y-2">
+        <Label>Faculty</Label>
+        <Select
+          value={facultyId ? String(facultyId) : undefined}
+          onValueChange={(v) => setFacultyId(Number(v))}
+          disabled={props.disabled}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Select faculty" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {context.faculty.map((f) => (
+                <SelectItem key={f.faculty_id} value={String(f.faculty_id)}>
+                  {f.name}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <Button type="submit" disabled={props.disabled} className="md:col-span-6">
+        Save Entry
+      </Button>
+    </form>
+  )
+}
+"use client"
+
+import { Card } from "@/components/ui/card"
+import type { DayName, Room, TimeSlot, TimetableEntry, Course, CourseOffering, Faculty } from "./types"
+
+export function TimetableGrid(props: {
+  termId: number | null
+  days: DayName[]
+  timeSlots: TimeSlot[]
+  entries: TimetableEntry[]
+  offeringById: Map<number, CourseOffering>
+  courseById: Map<number, Course>
+  roomById: Map<number, Room>
+  facultyById: Map<number, Faculty>
+}) {
+  const { days, timeSlots, entries } = props
+  // Build a lookup: key = `${day}-${timeslot_id}`
+  const cell = new Map<string, TimetableEntry>()
+  for (const e of entries) {
+    const k = `${e.day}-${e.timeslot_id}`
+    cell.set(k, e)
+  }
+
+  return (
+    <div className="w-full overflow-x-auto">
+      <div
+        className="grid"
+        style={{
+          gridTemplateColumns: `minmax(120px, 1fr) repeat(${days.length}, minmax(200px, 1fr))`,
+        }}
+      >
+        {/* Header Row */}
+        <div className="sticky left-0 z-10 bg-muted/40 font-medium px-3 py-2 border border-border">Time</div>
+        {days.map((d) => (
+          <div key={d} className="text-center font-medium px-3 py-2 border border-border bg-muted/40">
+            {d}
+          </div>
+        ))}
+
+        {/* Rows */}
+        {timeSlots
+          .slice()
+          .sort((a, b) => a.start_time.localeCompare(b.start_time))
+          .map((ts) => (
+            <>
+              <div
+                key={`label-${ts.timeslot_id}`}
+                className="sticky left-0 z-10 bg-card px-3 py-3 border border-border"
+              >
+                <div className="text-sm font-medium">
+                  {ts.start_time} – {ts.end_time}
+                </div>
+              </div>
+              {days.map((d) => {
+                const k = `${d}-${ts.timeslot_id}`
+                const e = cell.get(k)
+                return (
+                  <div key={k} className="px-3 py-3 border border-border">
+                    {e ? <EntryCard entry={e} {...props} /> : <EmptyCell />}
+                  </div>
+                )
+              })}
+            </>
+          ))}
+      </div>
+    </div>
+  )
+}
+
+function EmptyCell() {
+  return <div className="text-sm opacity-60">—</div>
+}
+
+function EntryCard(props: {
+  entry: TimetableEntry
+  offeringById: Map<number, CourseOffering>
+  courseById: Map<number, Course>
+  roomById: Map<number, Room>
+  facultyById: Map<number, Faculty>
+}) {
+  const { entry, offeringById, courseById, roomById, facultyById } = props
+  const offering = offeringById.get(entry.offering_id)
+  const course = offering ? courseById.get(offering.course_id) : undefined
+  const room = roomById.get(entry.room_id)
+  const fac = facultyById.get(entry.faculty_id)
+
+  return (
+    <Card className="bg-secondary text-secondary-foreground p-2">
+      <div className="text-sm font-medium text-pretty">
+        {course ? `${course.course_code} — ${course.name}` : `Offering #${entry.offering_id}`}
+      </div>
+      <div className="text-xs opacity-80 mt-1">
+        {room ? `Room: ${room.name}` : "Room: —"}
+        {" · "}
+        {fac ? `Faculty: ${fac.name}` : "Faculty: —"}
+      </div>
+    </Card>
+  )
+}
+"use client"
+
+import type React from "react"
+
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+
+type Column<T> = {
+  key: keyof T | string
+  header: string
+  render?: (item: T) => React.ReactNode
+}
+
+export function TuplesTable<T extends Record<string, any>>(props: {
+  items: T[]
+  columns: Column<T>[]
+  emptyText?: string
+}) {
+  const { items, columns } = props
+  if (!items || items.length === 0) {
+    return <p className="text-sm opacity-75">{props.emptyText ?? "No rows yet."}</p>
+  }
+
+  return (
+    <div className="rounded-md border border-border overflow-x-auto">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            {columns.map((c) => (
+              <TableHead key={String(c.key)}>{c.header}</TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {items.map((item, idx) => (
+            <TableRow key={idx}>
+              {columns.map((c) => (
+                <TableCell key={String(c.key)}>
+                  {c.render ? c.render(item) : formatCell(item[c.key as keyof T])}
+                </TableCell>
+              ))}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  )
+}
+
+function formatCell(v: unknown) {
+  if (v === null || v === undefined) return ""
+  if (typeof v === "object") return JSON.stringify(v)
+  return String(v)
+}
+export type DayName = "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun"
+export const dayNames: DayName[] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+export const dayOrder: Record<DayName, number> = {
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
+  Sun: 7,
+}
+
+// Core Entities (subset of columns for UI needs)
+export type Program = {
+  program_id: number
+  department_id: number
+  name: string
+}
+
+export type Term = {
+  term_id: number
+  program_id: number
+  year: number
+  semester: number
+}
+
+export type Room = {
+  room_id: number
+  name: string
+  capacity: number
+  institute_id: number
+  room_type: string
+}
+
+export type TimeSlot = {
+  timeslot_id: number
+  start_time: string // 'HH:MM'
+  end_time: string // 'HH:MM'
+  term_id: number
+}
+
+export type CourseType = "Major" | "Minor" | "Skill" | "AEC" | "VAC" | "Lab"
+export type Course = {
+  course_id: number
+  course_code: string
+  name: string
+  course_type: CourseType
+  department_id: number
+  theory_credits: number
+  lab_credits: number
+}
+
+export type CourseOffering = {
+  offering_id: number
+  course_id: number
+  term_id: number
+  section?: string
+  enrollment_limit?: number
+}
+
+export type Faculty = {
+  faculty_id: number
+  name: string
+  department_id: number
+  email?: string
+}
+
+export type TimetableEntry = {
+  entry_id: number
+  term_id: number
+  day: DayName
+  timeslot_id: number
+  offering_id: number
+  room_id: number
+  faculty_id: number
+}
+{
+  "name": "my-v0-project",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@hookform/resolvers": "^3.10.0",
+    "@radix-ui/react-accordion": "1.2.2",
+    "@radix-ui/react-alert-dialog": "1.1.4",
+    "@radix-ui/react-aspect-ratio": "1.1.1",
+    "@radix-ui/react-avatar": "1.1.2",
+    "@radix-ui/react-checkbox": "1.1.3",
+    "@radix-ui/react-collapsible": "1.1.2",
+    "@radix-ui/react-context-menu": "2.2.4",
+    "@radix-ui/react-dialog": "1.1.4",
+    "@radix-ui/react-dropdown-menu": "2.1.4",
+    "@radix-ui/react-hover-card": "1.1.4",
+    "@radix-ui/react-label": "2.1.1",
+    "@radix-ui/react-menubar": "1.1.4",
+    "@radix-ui/react-navigation-menu": "1.2.3",
+    "@radix-ui/react-popover": "1.1.4",
+    "@radix-ui/react-progress": "1.1.1",
+    "@radix-ui/react-radio-group": "1.2.2",
+    "@radix-ui/react-scroll-area": "1.2.2",
+    "@radix-ui/react-select": "2.1.4",
+    "@radix-ui/react-separator": "1.1.1",
+    "@radix-ui/react-slider": "1.2.2",
+    "@radix-ui/react-slot": "1.1.1",
+    "@radix-ui/react-switch": "1.1.2",
+    "@radix-ui/react-tabs": "1.1.2",
+    "@radix-ui/react-toast": "1.2.4",
+    "@radix-ui/react-toggle": "1.1.1",
+    "@radix-ui/react-toggle-group": "1.1.1",
+    "@radix-ui/react-tooltip": "1.1.6",
+    "@vercel/analytics": "1.3.1",
+    "autoprefixer": "^10.4.20",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "cmdk": "1.0.4",
+    "date-fns": "4.1.0",
+    "embla-carousel-react": "8.5.1",
+    "geist": "^1.3.1",
+    "input-otp": "1.4.1",
+    "lucide-react": "^0.454.0",
+    "next": "14.2.25",
+    "next-themes": "^0.4.6",
+    "react": "^19",
+    "react-day-picker": "9.8.0",
+    "react-dom": "^19",
+    "react-hook-form": "^7.60.0",
+    "react-resizable-panels": "^2.1.7",
+    "recharts": "2.15.4",
+    "sonner": "^1.7.4",
+    "tailwind-merge": "^3.3.1",
+    "tailwindcss-animate": "^1.0.7",
+    "vaul": "^0.9.9",
+    "zod": "3.25.67"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.9",
+    "@types/node": "^22",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "postcss": "^8.5",
+    "tailwindcss": "^4.1.9",
+    "tw-animate-css": "1.3.3",
+    "typescript": "^5"
+  }
+}
