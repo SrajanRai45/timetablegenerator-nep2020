@@ -1,0 +1,12 @@
+# Standard Netlify configuration for a Next.js project
+
+[build]
+  # Command to build the project
+  command = "npm run build"
+  
+  # Directory where the build output is stored
+  publish = ".next"
+
+[[plugins]]
+  # Essential plugin for Next.js on Netlify
+  package = "@netlify/plugin-nextjs"
